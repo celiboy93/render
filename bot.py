@@ -1,52 +1,58 @@
 import os
 import asyncio
+import random
 import logging
-from telethon import TelegramClient, events
+from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-# Render Environment Variables မှ Key များကို လှမ်းယူပါမည်
-# (ကုဒ်ထဲမှာ Key မထည့်ရပါ၊ Render မှာပဲ ထည့်ရပါမယ်)
-try:
-    API_ID = int(os.environ['API_ID'])
-    API_HASH = os.environ['API_HASH']
-    SESSION_STRING = os.environ['SESSION_STRING']
-    SOURCE_CHANNEL = int(os.environ['SOURCE_CHANNEL'])
-    DEST_GROUP = int(os.environ['DEST_GROUP'])
-    DELAY_MINUTES = int(os.environ.get('DELAY_MINUTES', 10)) # Default 10 မိနစ်
-except KeyError as e:
-    print(f"❌ Error: {e} is missing in Environment Variables!")
-    exit(1)
+# GitHub Secrets မှ Key များ
+API_ID = int(os.environ['API_ID'])
+API_HASH = os.environ['API_HASH']
+SESSION_STRING = os.environ['SESSION_STRING']
+SOURCE_CHANNEL = int(os.environ['SOURCE_CHANNEL'])
+DEST_GROUP = int(os.environ['DEST_GROUP'])
 
-# Logging Setup
-logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+# တစ်ခါ run ရင် ဘယ်နှပုဒ်တင်မလဲ?
+POSTS_PER_RUN = 3 
 
-print("🤖 Bot is Starting...")
+logging.basicConfig(level=logging.INFO)
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-try:
-    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-except Exception as e:
-    print(f"❌ Login Error: {e}")
-    exit(1)
+async def main():
+    await client.start()
+    print("🔍 Channel ထဲက Video များကို ရှာဖွေနေပါသည်...")
+    
+    # နောက်ဆုံး Post ၃၀၀၀ ထဲက Video/File ပါတာတွေကို စုမယ်
+    video_posts = []
+    async for message in client.iter_messages(SOURCE_CHANNEL, limit=3000):
+        if message.video or message.file:
+            video_posts.append(message)
+    
+    if not video_posts:
+        print("❌ Video များ မတွေ့ပါ။")
+        return
 
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL))
-async def handler(event):
-    # Video သို့မဟုတ် File ပါမှ Forward လုပ်မည်
-    if event.message.video or event.message.file:
-        msg_id = event.message.id
-        logger.info(f"📥 New Post Detected! ID: {msg_id}")
-        logger.info(f"⏳ Waiting {DELAY_MINUTES} minutes...")
-        
-        # သတ်မှတ်ချိန် စောင့်ဆိုင်းခြင်း
-        await asyncio.sleep(DELAY_MINUTES * 60)
-        
+    # ရှိတဲ့အထဲကနေ ၃ ပုဒ် (သို့မဟုတ် ရှိသလောက်) ကို Random ရွေးမယ်
+    count = min(len(video_posts), POSTS_PER_RUN)
+    selected_posts = random.sample(video_posts, count)
+    
+    print(f"🎲 စုစုပေါင်း {len(video_posts)} ပုဒ်ထဲမှ {count} ပုဒ်ကို ရွေးလိုက်ပါပြီ...")
+
+    # တစ်ပုဒ်ချင်းစီ Forward လုပ်မယ်
+    for i, post in enumerate(selected_posts):
         try:
-            # Group သို့ Forward လုပ်ခြင်း
-            await client.forward_messages(DEST_GROUP, event.message)
-            logger.info(f"✅ Forwarded Message {msg_id} to Group!")
+            await client.forward_messages(DEST_GROUP, post)
+            print(f"✅ [{i+1}/{count}] Post ID {post.id} ကို ပို့ပြီးပါပြီ!")
+            
+            # နောက်တစ်ပုဒ်မတင်ခင် ၁ မိနစ် နားမယ် (Spam မဖြစ်အောင်)
+            if i < count - 1:
+                print("⏳ နောက်တစ်ပုဒ်အတွက် ၁ မိနစ် စောင့်နေသည်...")
+                await asyncio.sleep(60) 
+                
         except Exception as e:
-            logger.error(f"❌ Forward Error: {e}")
+            print(f"❌ Error: {e}")
 
-print("✅ Bot Connected & Watching Channel...")
-client.start()
-client.run_until_disconnected()
+    await client.disconnect()
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(main())
